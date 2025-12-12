@@ -14,8 +14,9 @@ router.post('/import', async (req, res) => {
 
     const settingsRes = await db.query('SELECT * FROM settings LIMIT 1');
     const settings = settingsRes.rows[0];
-    const taxPercent = Number(settings.tax_percent) / 100;
-    const expensesPercent = Number(settings.expenses_percent) / 100;
+
+    const taxPercent = Number(settings.tax_percent || 0) / 100;
+    const expensesPercent = Number(settings.expenses_percent || 0) / 100;
 
     for (const sale of sales) {
       const { sku, date, quantity, gross_revenue, ml_fee } = sale;
@@ -30,30 +31,29 @@ router.post('/import', async (req, res) => {
       }
 
       const product = prodRes.rows[0];
-      const gross = Number(gross_revenue);
+      const gross = Number(gross_revenue || 0);
       const mlFee = Number(ml_fee || 0);
-      const qty = Number(quantity);
+      const qty = Number(quantity || 0);
 
+      // Regras (ajuste se quiser):
+      // imposto sobre bruto, despesas sobre bruto (ou líquido, se preferir)
       const taxValue = gross * taxPercent;
       const expensesValue = gross * expensesPercent;
-      const costValue = qty * Number(product.avg_cost);
+
+      const costValue = qty * Number(product.avg_cost || 0);
 
       const profit = gross - mlFee - taxValue - expensesValue - costValue;
 
       const id = uuidv4();
+
       await db.query(
-        `INSERT INTO sales
-           (id, product_id, sale_date, quantity,
-            gross_revenue, ml_fee, tax_value, expenses_value, profit, source)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        'INSERT INTO sales (id, product_id, sale_date, quantity, gross_revenue, ml_fee, tax_value, expenses_value, profit, source) ' +
+        'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
         [id, product.id, date, qty, gross, mlFee, taxValue, expensesValue, profit, 'manual']
       );
 
       await db.query(
-        `UPDATE products
-           SET current_stock = current_stock - $1,
-               updated_at = NOW()
-         WHERE id = $2`,
+        'UPDATE products SET current_stock = current_stock - $1, updated_at = NOW() WHERE id = $2',
         [qty, product.id]
       );
     }
@@ -70,36 +70,27 @@ router.post('/import', async (req, res) => {
 router.get('/list', async (req, res) => {
   try {
     const { date_from, date_to, source, limit = 300 } = req.query;
-    let query = `
-      SELECT s.id,
-             s.sale_date,
-             s.quantity,
-             s.gross_revenue,
-             s.ml_fee,
-             s.tax_value,
-             s.expenses_value,
-             s.profit,
-             s.source,
-             s.created_at,
-             p.sku,
-             p.name
-      FROM sales s
-      JOIN products p ON p.id = s.product_id
-    `;
+
+    let query =
+      'SELECT s.id, s.sale_date, s.quantity, s.gross_revenue, s.ml_fee, s.tax_value, s.expenses_value, s.profit, s.source, s.created_at, ' +
+      'p.sku, p.name ' +
+      'FROM sales s ' +
+      'JOIN products p ON p.id = s.product_id';
+
     const params = [];
     const conditions = [];
 
     if (date_from) {
       params.push(date_from);
-      conditions.push(\`s.sale_date >= $\${params.length}\`);
+      conditions.push('s.sale_date >= $' + params.length);
     }
     if (date_to) {
       params.push(date_to);
-      conditions.push(\`s.sale_date <= $\${params.length}\`);
+      conditions.push('s.sale_date <= $' + params.length);
     }
     if (source) {
       params.push(source);
-      conditions.push(\`s.source = $\${params.length}\`);
+      conditions.push('s.source = $' + params.length);
     }
 
     if (conditions.length) {
@@ -107,7 +98,7 @@ router.get('/list', async (req, res) => {
     }
 
     params.push(Number(limit));
-    query += \` ORDER BY s.sale_date DESC, s.created_at DESC LIMIT $\${params.length}\`;
+    query += ' ORDER BY s.sale_date DESC, s.created_at DESC LIMIT $' + params.length;
 
     const result = await db.query(query, params);
     res.json(result.rows);
@@ -121,34 +112,27 @@ router.get('/list', async (req, res) => {
 router.get('/ml', async (req, res) => {
   try {
     const { date_from, date_to, limit = 300 } = req.query;
-    let query = `
-      SELECT s.id,
-             s.sale_date,
-             s.quantity,
-             s.gross_revenue,
-             s.ml_fee,
-             s.tax_value,
-             s.expenses_value,
-             s.profit,
-             s.source,
-             s.created_at,
-             p.sku,
-             p.name
-      FROM sales s
-      JOIN products p ON p.id = s.product_id
-      WHERE s.source = 'mercado_livre'
-    `;
+
+    let query =
+      'SELECT s.id, s.sale_date, s.quantity, s.gross_revenue, s.ml_fee, s.tax_value, s.expenses_value, s.profit, s.source, s.created_at, ' +
+      'p.sku, p.name ' +
+      'FROM sales s ' +
+      'JOIN products p ON p.id = s.product_id ' +
+      "WHERE s.source = 'mercado_livre'";
+
     const params = [];
+
     if (date_from) {
       params.push(date_from);
-      query += \` AND s.sale_date >= $\${params.length}\`;
+      query += ' AND s.sale_date >= $' + params.length;
     }
     if (date_to) {
       params.push(date_to);
-      query += \` AND s.sale_date <= $\${params.length}\`;
+      query += ' AND s.sale_date <= $' + params.length;
     }
+
     params.push(Number(limit));
-    query += \` ORDER BY s.sale_date DESC, s.created_at DESC LIMIT $\${params.length}\`;
+    query += ' ORDER BY s.sale_date DESC, s.created_at DESC LIMIT $' + params.length;
 
     const result = await db.query(query, params);
     res.json(result.rows);
@@ -162,12 +146,12 @@ router.get('/ml', async (req, res) => {
 router.get('/daily', async (req, res) => {
   try {
     const result = await db.query(
-      `SELECT sale_date,
-              SUM(gross_revenue) AS total_revenue,
-              SUM(profit) AS total_profit
-       FROM sales
-       GROUP BY sale_date
-       ORDER BY sale_date`
+      'SELECT sale_date, ' +
+      'SUM(gross_revenue) AS total_revenue, ' +
+      'SUM(profit) AS total_profit ' +
+      'FROM sales ' +
+      'GROUP BY sale_date ' +
+      'ORDER BY sale_date'
     );
     res.json(result.rows);
   } catch (err) {
