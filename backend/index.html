@@ -1,0 +1,27 @@
+
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<title>Dashboard</title>
+<link rel="stylesheet" href="/assets/app.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+<nav>
+  <a href="/">Dashboard</a>
+  <a href="/products.html">Produtos</a>
+  <a href="/inventory.html">Estoque</a>
+  <a href="/sales.html">Vendas</a>
+  <a href="/settings.html">Configurações</a>
+</nav>
+<h1>Dashboard</h1>
+<div id="cards">
+  <div class="card">Unidades vendidas<br><span id="totalQty">-</span></div>
+  <div class="card" id="revCard">Faturamento (hover)</div>
+  <div class="card" id="profitCard">Lucro (hover)</div>
+</div>
+<canvas id="chart"></canvas>
+<script src="/assets/app.js"></script>
+</body>
+</html>
